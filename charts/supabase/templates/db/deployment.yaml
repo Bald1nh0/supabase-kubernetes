@@ -209,7 +209,7 @@ spec:
         {{- if .Values.db.persistence.enabled }}
         - name: postgres-volume
           persistentVolumeClaim:
-            claimName: {{ include "supabase.db.fullname" . }}-pvc
+            claimName: {{ include "supabase.db.fullname" . }}-pvc-{{ default "v1" .Values.db.persistence.generation }}
         {{- end }}
       {{- with .Values.db.nodeSelector }}
       nodeSelector:
