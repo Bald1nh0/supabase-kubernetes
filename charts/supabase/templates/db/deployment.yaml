@@ -28,16 +28,38 @@ spec:
       serviceAccountName: {{ include "supabase.db.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.db.podSecurityContext | nindent 8 }}
+        fsGroup: 102
+        fsGroupChangePolicy: OnRootMismatch
       initContainers:
-        # Add before your "init-db"
+        - name: fix-perms
+          image: supabase/postgres:17.6.1.032
+          command: ["/bin/sh","-lc"]
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data
+          args:
+            - |
+              mkdir -p "$PGDATA"
+              chown -R 101:102 "$PGDATA"
+              chmod 750 "$PGDATA"
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+          volumeMounts:
+            - name: postgres-volume
+              mountPath: /var/lib/postgresql/data
+
         - name: check-pgdata
           image: {{ .Values.db.image.repository }}:{{ .Values.db.image.tag | default .Chart.AppVersion }}
           command: ["/bin/sh","-lc"]
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data
           args:
             - |
-              echo "[check-pgdata] Listing PGDATA..."
-              ls -al /var/lib/postgresql/data || true
-              if [ -f /var/lib/postgresql/data/PG_VERSION ]; then
+              echo "[check-pgdata] PGDATA=$PGDATA"
+              ls -al "$PGDATA" || true
+              if [ -f "$PGDATA/PG_VERSION" ]; then
                 echo "[check-pgdata][WARN] PG_VERSION exists -> init will be skipped."
               else
                 echo "[check-pgdata][OK] No PG_VERSION -> fresh initdb will run."
@@ -45,7 +67,7 @@ spec:
           volumeMounts:
             - name: postgres-volume
               mountPath: /var/lib/postgresql/data
-              subPath: postgres-data
+
         - name: init-db
           image: "{{ .Values.db.image.repository }}:{{ .Values.db.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
@@ -55,33 +77,28 @@ spec:
               echo "[init-db] Prepare /initdb.d"
               mkdir -p /initdb.d /initdb.d/init-scripts /initdb.d/migrations
 
-              # 1) Keep all stock scripts from the image (includes migrate.sh, initial/auth schemas)
+              # 1) Stock scripts from image (migrate.sh + base schemas)
               cp -r /docker-entrypoint-initdb.d/* /initdb.d/ || true
 
-              # 2) Put our precreate role INTO ROOT (must run before migrate.sh)
+              # 2) Precreate supabase_admin (must be in root, before migrate.sh)
               cp /custom-init-scripts/00000000000000-precreate-supabase-admin.sql /initdb.d/
 
-              # 3) Place files exactly like in Compose
-              # init-scripts/
+              # 3) Compose-like layout
               cp /custom-init-scripts/98-webhooks.sql  /initdb.d/init-scripts/ || true
               cp /custom-init-scripts/99-roles.sql     /initdb.d/init-scripts/ || true
               cp /custom-init-scripts/99-jwt.sql       /initdb.d/init-scripts/ || true
 
-              # migrations/
               cp /custom-init-scripts/97-_supabase.sql /initdb.d/migrations/   || true
               cp /custom-init-scripts/99-logs.sql      /initdb.d/migrations/   || true
               cp /custom-init-scripts/99-realtime.sql  /initdb.d/migrations/   || true
               cp /custom-init-scripts/99-pooler.sql    /initdb.d/migrations/   || true
 
-              # extra user-defined migrations (optional)
+              # 4) Optional user migrations
               cp /custom-migrations/* /initdb.d/migrations/ || echo "[init-db] Skip user migrations"
 
-              echo "[init-db] ROOT:"
-              find /initdb.d -maxdepth 1 -type f -printf ' - %f\n' | sort
-              echo "[init-db] INIT-SCRIPTS:"
-              find /initdb.d/init-scripts -maxdepth 1 -type f -printf ' - %f\n' | sort || true
-              echo "[init-db] MIGRATIONS:"
-              find /initdb.d/migrations   -maxdepth 1 -type f -printf ' - %f\n' | sort || true
+              echo "[init-db] ROOT:";         find /initdb.d -maxdepth 1 -type f -printf ' - %f\n' | sort
+              echo "[init-db] INIT-SCRIPTS:"; find /initdb.d/init-scripts -maxdepth 1 -type f -printf ' - %f\n' | sort || true
+              echo "[init-db] MIGRATIONS:";   find /initdb.d/migrations   -maxdepth 1 -type f -printf ' - %f\n' | sort || true
           volumeMounts:
             - mountPath: /custom-init-scripts
               name: custom-init-scripts
@@ -89,29 +106,37 @@ spec:
               name: custom-migrations
             - mountPath: /initdb.d
               name: initdb-scripts-data
+
         - name: check-pgdata3
           image: {{ .Values.db.image.repository }}:{{ .Values.db.image.tag | default .Chart.AppVersion }}
           command: ["/bin/sh","-lc"]
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data
           args:
             - |
-              echo "[check-pgdata] Listing PGDATA..."
-              ls -al /var/lib/postgresql/data || true
-              if [ -f /var/lib/postgresql/data/PG_VERSION ]; then
-                echo "[check-pgdata][WARN] PG_VERSION exists -> init will be skipped."
+              echo "[check-pgdata3] PGDATA=$PGDATA"
+              ls -al "$PGDATA" || true
+              if [ -f "$PGDATA/PG_VERSION" ]; then
+                echo "[check-pgdata3][WARN] PG_VERSION exists -> init will be skipped."
               else
-                echo "[check-pgdata][OK] No PG_VERSION -> fresh initdb will run."
+                echo "[check-pgdata3][OK] No PG_VERSION -> fresh initdb will run."
               fi
           volumeMounts:
             - name: postgres-volume
               mountPath: /var/lib/postgresql/data
-              subPath: postgres-data
+
       containers:
         - name: {{ include "supabase.db.name" $ }}
           securityContext:
             {{- toYaml .Values.db.securityContext | nindent 12 }}
+            runAsUser: 101
+            runAsGroup: 102
           image: "{{ .Values.db.image.repository }}:{{ .Values.db.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.db.image.pullPolicy }}
           env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data
             {{- range $key, $value := .Values.db.environment }}
             - name: {{ $key }}
               value: {{ $value | quote }}
@@ -175,8 +200,8 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           ports:
-            - name: http
-              containerPort: 9999
+            - name: postgres
+              containerPort: 5432
               protocol: TCP
           volumeMounts:
             - mountPath: /docker-entrypoint-initdb.d
@@ -187,7 +212,6 @@ spec:
             {{- if .Values.db.persistence.enabled }}
             - mountPath: /var/lib/postgresql/data
               name: postgres-volume
-              subPath: postgres-data
             {{- end }}
           {{- with .Values.db.resources }}
           resources:
@@ -195,8 +219,7 @@ spec:
           {{- end }}
       volumes:
         - name: initdb-scripts-data
-          emptyDir:
-            medium: ""
+          emptyDir: {}
         - name: custom-init-scripts
           configMap:
             name: {{ include "supabase.db.fullname" . }}-initdb
