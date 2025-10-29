@@ -36,46 +36,37 @@ spec:
           args:
             - |
               set -euo pipefail
-              echo "[init-db] Preparing /initdb.d..."
-
-              # Ensure layout exists
+              echo "[init-db] Prepare /initdb.d"
               mkdir -p /initdb.d /initdb.d/init-scripts /initdb.d/migrations
 
-              echo "[init-db] Copy baseline from image..."
+              # 1) Keep all stock scripts from the image (includes migrate.sh, initial/auth schemas)
               cp -r /docker-entrypoint-initdb.d/* /initdb.d/ || true
 
-              echo "[init-db] Inject our precreate role to ROOT (must run before migrate.sh)..."
+              # 2) Put our precreate role INTO ROOT (must run before migrate.sh)
               cp /custom-init-scripts/00000000000000-precreate-supabase-admin.sql /initdb.d/
 
-              echo "[init-db] Inject our init-scripts and migrations..."
+              # 3) Place files exactly like in Compose
+              # init-scripts/
               cp /custom-init-scripts/98-webhooks.sql  /initdb.d/init-scripts/ || true
               cp /custom-init-scripts/99-roles.sql     /initdb.d/init-scripts/ || true
+              cp /custom-init-scripts/99-jwt.sql       /initdb.d/init-scripts/ || true
+
+              # migrations/
+              cp /custom-init-scripts/97-_supabase.sql /initdb.d/migrations/   || true
               cp /custom-init-scripts/99-logs.sql      /initdb.d/migrations/   || true
               cp /custom-init-scripts/99-realtime.sql  /initdb.d/migrations/   || true
+              cp /custom-init-scripts/99-pooler.sql    /initdb.d/migrations/   || true
 
-              echo "[init-db] User-defined migrations (optional)..."
+              # extra user-defined migrations (optional)
               cp /custom-migrations/* /initdb.d/migrations/ || echo "[init-db] Skip user migrations"
 
-              echo "[init-db] --- Sanity checks ---"
-              echo "[init-db] ROOT files (execution order):"
+              echo "[init-db] ROOT:"
               find /initdb.d -maxdepth 1 -type f -printf ' - %f\n' | sort
-              echo "[init-db] Has migrate.sh?"
-              ls -l /initdb.d/migrate.sh || { echo "[init-db][ERROR] migrate.sh missing!"; exit 1; }
-
-              echo "[init-db] Has precreate script in ROOT?"
-              if [ ! -f /initdb.d/00000000000000-precreate-supabase-admin.sql ]; then
-                echo "[init-db][ERROR] precreate script missing in ROOT!"; exit 1;
-              fi
-
-              echo "[init-db] INIT SCRIPTS:"
+              echo "[init-db] INIT-SCRIPTS:"
               find /initdb.d/init-scripts -maxdepth 1 -type f -printf ' - %f\n' | sort || true
               echo "[init-db] MIGRATIONS:"
               find /initdb.d/migrations   -maxdepth 1 -type f -printf ' - %f\n' | sort || true
 
-              echo "[init-db] Show migrate.sh header:"
-              head -n 20 /initdb.d/migrate.sh || true
-
-              echo "[init-db] Done."
           volumeMounts:
             - mountPath: /custom-init-scripts
               name: custom-init-scripts
