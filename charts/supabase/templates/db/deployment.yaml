@@ -29,6 +29,23 @@ spec:
       securityContext:
         {{- toYaml .Values.db.podSecurityContext | nindent 8 }}
       initContainers:
+        # Add before your "init-db"
+        - name: check-pgdata
+          image: {{ .Values.db.image.repository }}:{{ .Values.db.image.tag | default .Chart.AppVersion }}
+          command: ["/bin/sh","-lc"]
+          args:
+            - |
+              echo "[check-pgdata] Listing PGDATA..."
+              ls -al /var/lib/postgresql/data || true
+              if [ -f /var/lib/postgresql/data/PG_VERSION ]; then
+                echo "[check-pgdata][WARN] PG_VERSION exists -> init will be skipped."
+              else
+                echo "[check-pgdata][OK] No PG_VERSION -> fresh initdb will run."
+              fi
+          volumeMounts:
+            - name: postgres-volume
+              mountPath: /var/lib/postgresql/data
+              subPath: postgres-data
         - name: init-db
           image: "{{ .Values.db.image.repository }}:{{ .Values.db.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
@@ -65,7 +82,6 @@ spec:
               find /initdb.d/init-scripts -maxdepth 1 -type f -printf ' - %f\n' | sort || true
               echo "[init-db] MIGRATIONS:"
               find /initdb.d/migrations   -maxdepth 1 -type f -printf ' - %f\n' | sort || true
-
           volumeMounts:
             - mountPath: /custom-init-scripts
               name: custom-init-scripts
@@ -73,6 +89,22 @@ spec:
               name: custom-migrations
             - mountPath: /initdb.d
               name: initdb-scripts-data
+        - name: check-pgdata3
+          image: {{ .Values.db.image.repository }}:{{ .Values.db.image.tag | default .Chart.AppVersion }}
+          command: ["/bin/sh","-lc"]
+          args:
+            - |
+              echo "[check-pgdata] Listing PGDATA..."
+              ls -al /var/lib/postgresql/data || true
+              if [ -f /var/lib/postgresql/data/PG_VERSION ]; then
+                echo "[check-pgdata][WARN] PG_VERSION exists -> init will be skipped."
+              else
+                echo "[check-pgdata][OK] No PG_VERSION -> fresh initdb will run."
+              fi
+          volumeMounts:
+            - name: postgres-volume
+              mountPath: /var/lib/postgresql/data
+              subPath: postgres-data
       containers:
         - name: {{ include "supabase.db.name" $ }}
           securityContext:
