@@ -35,7 +35,6 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
-              set -euo pipefail
               echo "[init-db] Prepare /initdb.d"
               mkdir -p /initdb.d /initdb.d/init-scripts /initdb.d/migrations
 
