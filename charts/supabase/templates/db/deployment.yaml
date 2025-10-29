@@ -55,14 +55,14 @@ spec:
             runAsGroup: 0
           env:
             - name: PGDATA
-              value: /var/lib/postgresql/data
+              value: /var/lib/postgresql/data/pgdata
           command: ["/bin/sh","-lc"]
           args:
-            - >
-              set -e;
-              mkdir -p "$PGDATA";
-              chown -R 101:102 "$PGDATA";
-              chmod 750 "$PGDATA";
+            - |
+              set -e
+              mkdir -p "$PGDATA"
+              chown -R 101:102 "$PGDATA" /var/lib/postgresql/data
+              chmod 750 "$PGDATA" /var/lib/postgresql/data
           volumeMounts:
             - name: postgres-volume
               mountPath: /var/lib/postgresql/data
@@ -71,7 +71,7 @@ spec:
           image: {{ .Values.db.image.repository }}:{{ .Values.db.image.tag | default .Chart.AppVersion }}
           env:
             - name: PGDATA
-              value: /var/lib/postgresql/data
+              value: /var/lib/postgresql/data/pgdata
           command: ["/bin/sh","-lc"]
           args:
             - >
@@ -115,25 +115,6 @@ spec:
             - mountPath: /initdb.d
               name: initdb-scripts-data
 
-        - name: check-pgdata3
-          image: {{ .Values.db.image.repository }}:{{ .Values.db.image.tag | default .Chart.AppVersion }}
-          env:
-            - name: PGDATA
-              value: /var/lib/postgresql/data
-          command: ["/bin/sh","-lc"]
-          args:
-            - >
-              echo "[check-pgdata3] PGDATA=$PGDATA";
-              ls -al "$PGDATA" || true;
-              if [ -f "$PGDATA/PG_VERSION" ]; then
-                echo "[check-pgdata3][WARN] PG_VERSION exists -> init will be skipped.";
-              else
-                echo "[check-pgdata3][OK] No PG_VERSION -> fresh initdb will run.";
-              fi
-          volumeMounts:
-            - name: postgres-volume
-              mountPath: /var/lib/postgresql/data
-
       containers:
         - name: {{ include "supabase.db.name" $ }}
           image: {{ .Values.db.image.repository }}:{{ .Values.db.image.tag | default .Chart.AppVersion }}
@@ -143,7 +124,7 @@ spec:
             runAsGroup: 102
           env:
             - name: PGDATA
-              value: /var/lib/postgresql/data
+              value: /var/lib/postgresql/data/pgdata
             {{- range $key, $value := .Values.db.environment }}
             - name: {{ $key }}
               value: {{ $value | quote }}
