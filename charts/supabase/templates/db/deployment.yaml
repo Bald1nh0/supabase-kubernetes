@@ -134,7 +134,7 @@ spec:
             {{- if .Values.db.persistence.enabled }}
             - mountPath: /var/lib/postgresql/data
               name: postgres-volume
-              subPath: postgres-data
+              subPath: postgres-data-{{ .Values.db.persistence.generation | default "v1" }}
             {{- end }}
           {{- with .Values.db.resources }}
           resources:
