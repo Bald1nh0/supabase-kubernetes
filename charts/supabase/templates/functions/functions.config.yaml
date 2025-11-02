@@ -6,98 +6,96 @@ metadata:
   labels:
     {{- include "supabase.labels" . | nindent 4 }}
 data:
+  # Edge runtime main entrypoint must live at /home/deno/functions/main/index.ts
   index.ts: |
-    import { serve } from 'https://deno.land/std@0.131.0/http/server.ts'
+    // Do not import std/http/server.ts here — edge runtime expects Deno.serve or export default { fetch }.
     import * as jose from 'https://deno.land/x/jose@v4.14.4/index.ts'
 
-    console.log('main function started')
+    // Optional health check for quick liveness probes
+    const HEALTH_PATH = '/health'
 
-    const JWT_SECRET = Deno.env.get('JWT_SECRET')
-    const VERIFY_JWT = Deno.env.get('VERIFY_JWT') === 'true'
+    const JWT_SECRET = Deno.env.get('JWT_SECRET') ?? ''
+    const VERIFY_JWT = (Deno.env.get('VERIFY_JWT') ?? 'false') === 'true'
 
-    function getAuthToken(req: Request) {
+    function getAuthToken(req: Request): string {
       const authHeader = req.headers.get('authorization')
-      if (!authHeader) {
-        throw new Error('Missing authorization header')
-      }
+      if (!authHeader) throw new Error('Missing authorization header')
       const [bearer, token] = authHeader.split(' ')
-      if (bearer !== 'Bearer') {
-        throw new Error(`Auth header is not 'Bearer {token}'`)
-      }
+      if (bearer !== 'Bearer') throw new Error(`Auth header is not 'Bearer {token}'`)
       return token
     }
 
     async function verifyJWT(jwt: string): Promise<boolean> {
-      const encoder = new TextEncoder()
-      const secretKey = encoder.encode(JWT_SECRET)
       try {
-        await jose.jwtVerify(jwt, secretKey)
-      } catch (err) {
-        console.error(err)
+        await jose.jwtVerify(jwt, new TextEncoder().encode(JWT_SECRET))
+        return true
+      } catch {
         return false
       }
-      return true
     }
 
-    serve(async (req: Request) => {
+    // Edge runtime entrypoint
+    Deno.serve(async (req: Request) => {
+      const url = new URL(req.url)
+
+      // Health endpoint
+      if (req.method === 'GET' && url.pathname === HEALTH_PATH) {
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { 'content-type': 'application/json' }
+        })
+      }
+
+      // Optional JWT verification
       if (req.method !== 'OPTIONS' && VERIFY_JWT) {
         try {
-          const token = getAuthToken(req)
-          const isValidJWT = await verifyJWT(token)
-
-          if (!isValidJWT) {
+          const ok = await verifyJWT(getAuthToken(req))
+          if (!ok) {
             return new Response(JSON.stringify({ msg: 'Invalid JWT' }), {
               status: 401,
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'content-type': 'application/json' }
             })
           }
         } catch (e) {
-          console.error(e)
-          return new Response(JSON.stringify({ msg: e.toString() }), {
+          return new Response(JSON.stringify({ msg: String(e) }), {
             status: 401,
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'content-type': 'application/json' }
           })
         }
       }
 
-      const url = new URL(req.url)
-      const { pathname } = url
-      const path_parts = pathname.split('/')
-      const service_name = path_parts[1]
-
-      if (!service_name || service_name === '') {
-        const error = { msg: 'missing function name in request' }
-        return new Response(JSON.stringify(error), {
+      // Dynamic function dispatch (keep same shape as your previous logic)
+      const pathParts = url.pathname.split('/').filter(Boolean)
+      const serviceName = pathParts[0] ?? ''
+      if (!serviceName) {
+        return new Response(JSON.stringify({ msg: 'missing function name in request' }), {
           status: 400,
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'content-type': 'application/json' }
         })
       }
 
-      const servicePath = `/home/deno/functions/${service_name}`
-      console.error(`serving the request with ${servicePath}`)
-
+      const servicePath = `/home/deno/functions/${serviceName}`
       const memoryLimitMb = 150
-      const workerTimeoutMs = 1 * 60 * 1000
+      const workerTimeoutMs = 60_000
       const noModuleCache = false
       const importMapPath = null
       const envVarsObj = Deno.env.toObject()
-      const envVars = Object.keys(envVarsObj).map((k) => [k, envVarsObj[k]])
+      const envVars = Object.entries(envVarsObj)
 
       try {
+        // Create per-request worker and forward the request
         const worker = await EdgeRuntime.userWorkers.create({
           servicePath,
           memoryLimitMb,
           workerTimeoutMs,
           noModuleCache,
           importMapPath,
-          envVars,
+          envVars
         })
         return await worker.fetch(req)
       } catch (e) {
-        const error = { msg: e.toString() }
-        return new Response(JSON.stringify(error), {
+        return new Response(JSON.stringify({ msg: String(e) }), {
           status: 500,
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'content-type': 'application/json' }
         })
       }
     })
