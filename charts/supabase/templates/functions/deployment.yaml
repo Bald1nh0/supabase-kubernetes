@@ -41,7 +41,7 @@ spec:
                 echo "ERROR: /home/deno/functions/main/index.ts is missing"; exit 1
               fi
           volumeMounts:
-            - mountPath: /home/deno
+            - mountPath: /home/deno/functions/main
               name: functions-main
       containers:
         - args:
