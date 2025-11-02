@@ -123,7 +123,7 @@ spec:
             {{- with .Values.functions.volumeMounts }}
               {{- toYaml . | nindent 12 }}
             {{- end }}
-            - mountPath: /home/deno/functions/main
+            - mountPath: /home/deno/functions
               name: functions-main
           {{- with .Values.functions.resources }}
           resources:
@@ -136,6 +136,9 @@ spec:
         - name: functions-main
           configMap:
             name: {{ include "supabase.functions.fullname" . }}-main
+            items:
+              - key: index.ts
+                path: main/index.ts
       {{- with .Values.functions.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
