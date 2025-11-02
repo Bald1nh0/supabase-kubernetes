@@ -32,7 +32,7 @@ spec:
         - args:
             - start
             - --main-service
-            - main
+            - /home/deno/functions/main/index.ts
           name: {{ include "supabase.functions.name" $ }}
           securityContext:
             {{- toYaml .Values.functions.securityContext | nindent 12 }}
